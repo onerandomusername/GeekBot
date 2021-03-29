@@ -1,0 +1,5 @@
+aiohttp==3.7.4
+coloredlogs==15.0
+discord.py==1.6.0
+python-dotenv==0.15.0
+verboselogs==1.7

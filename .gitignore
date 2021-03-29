@@ -1,0 +1,18 @@
+#python cache
+__pycache__
+
+#configuration
+config.py
+.env
+
+#ide
+*.code-workspace
+Pipfile
+Pipfile.lock
+.python-version
+
+#logging stuff
+.log
+*logs*
+*log*
+
