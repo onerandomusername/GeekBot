@@ -21,9 +21,10 @@ from dotenv import load_dotenv
 from config import DESCRIPTION, LOG_LEVEL, TOKEN
 
 EXTENSIONS = (
-    'cogs.admin',
+    'cogs.owner.admin',
     'cogs.cloudahk',
     'cogs.meta',
+    'cogs.source',
     'utils.error_handling'
 )
 
@@ -79,6 +80,7 @@ class Bot(commands.Bot):
         self.http_session: Optional[aiohttp.ClientSession] = None
         self.closing_tasks: List[asyncio.Task] = []
         self.invite_link = "https://discord.com/api/oauth2/authorize?client_id={}&permissions=379968&scope=bot"
+        self.github_link = 'https://github.com/onerandomusername/geekbot'
 
     def create_http_pool(self) -> None:
         aiohttp_log: verboselogs.VerboseLogger = logging.getLogger('aiotrace')
