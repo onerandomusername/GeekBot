@@ -22,9 +22,9 @@ from config import DESCRIPTION, LOG_LEVEL, TOKEN
 
 EXTENSIONS = (
     'cogs.admin',
-    'cogs.ahk',
+    'cogs.cloudahk',
     'cogs.meta',
-    'exts.error_handling'
+    'utils.error_handling'
 )
 
 
@@ -35,7 +35,6 @@ def setup_logger():  # -> logging.getLogger:
 
     verboselogs.install()
     log: verboselogs.VerboseLogger = logging.getLogger(__name__)
-
     # set logging levels for various libs
     logging.getLogger('discord').setLevel(logging.INFO)
     logging.getLogger('websockets').setLevel(logging.INFO)
@@ -48,6 +47,7 @@ def setup_logger():  # -> logging.getLogger:
         '{asctime} [{levelname}] {name}: {message}', datefmt='%Y-%m-%d %H:%M:%S', style='{')
     coloredlogs.install(
         level=verboselogs.SPAM, fmt='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
+    log.success("Logger Configured.")
     # log.setFormatter(fmt)
     # stream = ColorStreamHandler(sys.stdout)
     # stream.setFormatter(fmt)
@@ -111,7 +111,7 @@ class Bot(commands.Bot):
     async def close(self) -> None:
         """Close the Discord connection and the aiohttp session"""
         # Done before super().close() to allow tasks finish before the HTTP session closes.
-        await bot.change_presence(activity=discord.Game(name="shutting down", status=discord.Status.dnd))
+        await self.change_presence(activity=discord.Game(name="shutting down", status=discord.Status.dnd))
         for ext in list(EXTENSIONS):
             with suppress(Exception):
                 self.unload_extension(ext)
@@ -128,7 +128,7 @@ class Bot(commands.Bot):
         if self.http_session:
             await self.http_session.close()
 
-        await bot.change_presence(status=discord.Status.offline)
+        await self.change_presence(status=discord.Status.offline)
         await asyncio.sleep(1)
         # Now actually do full close of bot
         await super().close()

@@ -44,7 +44,7 @@ class RunnableCodeConverter(commands.Converter):
 
         return code
 
-class AutoHotkey(commands.Cog):
+class CloudAHK(commands.Cog):
     '''Commands for the AutoHotkey guild.'''
 
     def __init__(self, bot: Bot):
@@ -264,4 +264,4 @@ class AutoHotkey(commands.Cog):
 
 
 def setup(bot: Bot):
-    bot.add_cog(AutoHotkey(bot))
+    bot.add_cog(CloudAHK(bot))
