@@ -3,3 +3,4 @@ coloredlogs==15.0
 discord.py==1.6.0
 python-dotenv==0.15.0
 verboselogs==1.7
+pygit2==1.5.0
