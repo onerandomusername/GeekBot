@@ -80,7 +80,6 @@ class Bot(commands.Bot):
         self.http_session: Optional[aiohttp.ClientSession] = None
         self.closing_tasks: List[asyncio.Task] = []
         self.invite_link = "https://discord.com/api/oauth2/authorize?client_id={}&permissions=379968&scope=bot"
-        self.github_link = 'https://github.com/onerandomusername/geekbot'
 
     def create_http_pool(self) -> None:
         aiohttp_log: verboselogs.VerboseLogger = logging.getLogger('aiotrace')
@@ -134,6 +133,13 @@ class Bot(commands.Bot):
         await asyncio.sleep(1)
         # Now actually do full close of bot
         await super().close()
+
+    async def on_error(self, event_method, *args, **kwargs):
+        """A global error handler"""
+        log.error(event_method)
+        if isinstance(event_method, (commands.CheckFailure, commands.CommandNotFound)):
+            return
+
 
     async def on_ready(self):
         log.info('Ready! %s', self.user)
