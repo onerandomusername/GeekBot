@@ -42,12 +42,10 @@ class SomeCommands(commands.Cog):
         if source_item is None:
             await ctx.send(github_link)
             return
-
         cmd = self.bot.get_command(source_item)
 
         if cmd is None:
             raise commands.CommandError('Couldn\'t find command.')
-
         source_lines = inspect.getsourcelines(cmd.callback)
         source_file = inspect.getsourcefile(cmd.callback)
 
