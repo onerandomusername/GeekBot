@@ -1,12 +1,15 @@
+import inspect
 import logging
 import time
 import typing
+from pathlib import Path
 
 import discord
+import pygit2
 import verboselogs
-# if typing.TYPE_CHECKING:
 from bot import Bot
-from discord.ext import commands  # Again, we need this imported
+from constants import github_link
+from discord.ext import commands
 
 log: verboselogs.VerboseLogger = logging.getLogger(__name__)
 
@@ -33,6 +36,34 @@ class SomeCommands(commands.Cog):
         ctx.reply(f'Invite me here!\n<{self.bot.invite_link.format(self.bot.user.id)}> \n'
                   '**Warning!** I am currently not a public bot and may never be!' if not app_info.bot_public else ''
                   )
+
+    @commands.command(name='source', aliases=['src', 'code'])
+    async def source(self, ctx: commands.Context, source_item: str = None):
+        if source_item is None:
+            await ctx.send(github_link)
+            return
+
+        cmd = self.bot.get_command(source_item)
+
+        if cmd is None:
+            raise commands.CommandError('Couldn\'t find command.')
+
+        source_lines = inspect.getsourcelines(cmd.callback)
+        source_file = inspect.getsourcefile(cmd.callback)
+
+        length, start_line = len(source_lines[0]), source_lines[1]
+        end_line = start_line + length
+        repo = pygit2.Repository('.git')
+        tree = None
+        for branch in list(repo.branches.local):
+            b = repo.lookup_branch(branch)
+            if b.is_head():
+                tree = branch
+                break
+
+        link = f'{github_link}/tree/{tree}/{Path(source_file).relative_to(str(Path.cwd()))}'
+        link += f'#L{start_line}-L{end_line}'
+        await ctx.send(link)
 
 
 def setup(bot: Bot):
