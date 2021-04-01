@@ -4,6 +4,8 @@ __pycache__
 #configuration
 config.py
 .env
+.*
+pyproject.toml
 
 #ide
 *.code-workspace
@@ -15,4 +17,3 @@ Pipfile.lock
 .log
 *logs*
 *log*
-

@@ -17,12 +17,18 @@ class ErrorHandler(commands.Cog):
         raise Exception
 
     @commands.Cog.listener()
-    async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
+    async def on_command_error(
+        self, ctx: commands.Context, error: commands.CommandError
+    ):
         """A global error handler"""
         log.error(error)
         if isinstance(error, (commands.CheckFailure, commands.CommandNotFound)):
             return
-        await ctx.send('something went wrong')
+        if str(error) is None:
+            msg = "something went wrong"
+        else:
+            msg = str(error)
+        await ctx.send(msg)
 
 
 def setup(bot: Bot):
