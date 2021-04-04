@@ -273,9 +273,10 @@ class Admin(commands.Cog):
     ) -> discord.Message:
         """Send a nicely formatted eval response"""
         if resp is None and error is None:
-            return await ctx.reply(
+            return await ctx.send(
                 "No output.",
                 allowed_mentions=discord.AllowedMentions(replied_user=False),
+                reference=ctx.message.to_reference(fail_if_not_exists=False),
             )
         resp_file: discord.File = None
         # for now, we're not gonna handle exceptions as files
@@ -312,15 +313,16 @@ class Admin(commands.Cog):
         for f in resp_file, error_file:
             if f is not None:
                 files.append(f)
-        return await ctx.reply(
+        return await ctx.send(
             out,
             files=files,
             allowed_mentions=discord.AllowedMentions(replied_user=False),
+            reference=ctx.message.to_reference(fail_if_not_exists=False),
         )
 
     @commands.command(pass_context=True, hidden=True, name="eval", aliases=["e"])
     async def _eval(self, ctx: commands.Context, *, body: str):
-        """Evaluates a code"""
+        """Evaluates provided code. Owner only."""
         log.spam("command _eval executed.")
 
         env = {
@@ -355,23 +357,28 @@ class Admin(commands.Cog):
 
                 if inspect.CO_COROUTINE & co_code.co_flags == inspect.CO_COROUTINE:
                     awaitable = FunctionType(co_code, env)
-                    result = (await awaitable()) or ""  # catch this
+                    result = await awaitable()
                 else:
-                    result = runwith(co_code, env)  # catch this
+                    result = runwith(co_code, env)
         except Exception:
             exc_type, exc_value, exc_traceback = sys.exc_info()
             error = traceback.format_exception(exc_type, exc_value, exc_traceback)
             error.pop(1)
             error = "".join(error).strip()
             # await ctx.send(f"```py\n{error}```")  # catch this
-
+        try:
+            await ctx.message.add_reaction("\u2705")
+        except Exception:
+            pass
         log.spam(f"result: {result}")
         if result is not None:
             pprint(result, stream=stdout)
         result = stdout.getvalue()
         if result.rstrip("\n") == "":
             result = None
-        return await self._send_stdout(ctx=ctx, resp=result, error=error)
+
+        msg = await self._send_stdout(ctx=ctx, resp=result, error=error)
+        return msg
 
     @commands.command(pass_context=True, hidden=True, name="print")
     async def _print(self, ctx, *, body: str):
@@ -516,7 +523,7 @@ class Admin(commands.Cog):
         msg.content = ctx.prefix + command
 
         new_ctx = await self.bot.get_context(msg, cls=type(ctx))
-        new_ctx._db = PerformanceMocker()
+        # new_ctx._db = PerformanceMocker()
 
         # Intercepts the Messageable interface a bit
         new_ctx._state = PerformanceMocker()
