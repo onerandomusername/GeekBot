@@ -6,7 +6,7 @@ This Source Code Form is subject to the terms of the Mozilla Public
 License, v. 2.0. If a copy of the MPL was not distributed with this
 file, You can obtain one at http://mozilla.org/MPL/2.0/.
 """
-
+import ast
 import asyncio
 import copy
 
@@ -30,12 +30,15 @@ from contextlib import redirect_stdout
 
 # to expose to the eval command
 from pprint import pprint
+from types import FunctionType
 from typing import Optional, Union
 
 import discord
 import verboselogs
 from bot import Bot
+from constants import MESSAGE_LIMIT
 from discord.ext import commands
+from utils.file import create_file_obj
 
 log: verboselogs.VerboseLogger = logging.getLogger(__name__)
 
@@ -109,6 +112,7 @@ class Admin(commands.Cog):
     """Admin-only commands that make the bot dynamic."""
 
     def __init__(self, bot: Bot):
+        log.debug("loading cog Admin")
         self.bot = bot
         self._last_result = None
         self.sessions = set()
@@ -244,9 +248,82 @@ class Admin(commands.Cog):
 
     #     await ctx.send('\n'.join(f'{status}: `{module}`' for status, module in statuses))
 
-    @commands.command(pass_context=True, hidden=True, name="eval")
+    @staticmethod
+    def _runwith(code: str):
+        """determine the meth to run the code with"""
+        code = code.strip()
+        if ";" in code:
+            return exec
+        elif "\n" in code:
+            if code.count("\\\n") == code.count("\n"):
+                return eval
+            else:
+                return exec
+        elif code.count("\n"):
+            return exec
+        else:
+            return eval
+
+    async def _send_stdout(
+        self,
+        ctx: commands.Context,
+        resp: str = None,
+        error: Exception = None,
+        runtime=None,
+    ) -> discord.Message:
+        """Send a nicely formatted eval response"""
+        if resp is None and error is None:
+            return await ctx.send(
+                "No output.",
+                allowed_mentions=discord.AllowedMentions(replied_user=False),
+                reference=ctx.message.to_reference(fail_if_not_exists=False),
+            )
+        resp_file: discord.File = None
+        # for now, we're not gonna handle exceptions as files
+        # unless, for some reason, it has a ``` in it
+        error_file: discord.File = None
+        total_len = 0
+        fmt_resp: str = "```py\n{}```"
+        fmt_err: str = "\nAn error occured. Unforunate.```py\n{}```"
+        out = ""
+        files = []
+
+        # make a resp object
+        if resp is not None:
+            total_len += len(fmt_resp)
+            total_len += len(resp)
+            if "```" in resp:
+                resp_file = True
+
+        if error is not None:
+            total_len += len(fmt_err)
+            total_len += len(error)
+            if "```" in error:
+                error_file = True
+
+        if total_len > MESSAGE_LIMIT:
+            log.debug("rats we gotta upload as a file")
+            resp_file: discord.File = create_file_obj(resp, ext="py")
+        else:
+            # good job, not a file
+            log.debug("sending response as plaintext")
+            out += fmt_resp.format(resp) if resp is not None else ""
+        out += fmt_err.format(error) if error is not None else ""
+
+        for f in resp_file, error_file:
+            if f is not None:
+                files.append(f)
+        return await ctx.send(
+            out,
+            files=files,
+            allowed_mentions=discord.AllowedMentions(replied_user=False),
+            reference=ctx.message.to_reference(fail_if_not_exists=False),
+        )
+
+    @commands.command(pass_context=True, hidden=True, name="eval", aliases=["e"])
     async def _eval(self, ctx: commands.Context, *, body: str):
-        """Evaluates a code"""
+        """Evaluates provided code. Owner only."""
+        log.spam("command _eval executed.")
 
         env = {
             "bot": self.bot,
@@ -260,41 +337,51 @@ class Admin(commands.Cog):
         }
 
         env.update(globals())
-
+        log.spam("updated globals")
         body = self.cleanup_code(body)
+        log.spam(f"body: {body}")
         stdout = io.StringIO()
-
-        to_compile = f'async def func():\n{textwrap.indent(body, "  ")}'
-
-        try:
-            exec(to_compile, env)
-        except Exception as e:
-            return await ctx.send(f"```py\n{e.__class__.__name__}: {e}\n```")
-
-        func = env["func"]
+        code = body
+        result = None
+        error = None
         try:
             with redirect_stdout(stdout):
-                ret = await func()
-        except Exception:
-            value = stdout.getvalue()
-            await ctx.send(f"```py\n{value}{traceback.format_exc()}\n```")
-        else:
-            value = stdout.getvalue()
-            try:
-                await ctx.message.add_reaction("\u2705")
-            except Exception:
-                pass
+                runwith = self._runwith(code)
+                log.spam(runwith.__name__)
+                co_code = compile(
+                    code,
+                    "<int eval>",
+                    runwith.__name__,
+                    flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT,
+                )
 
-            if ret is None:
-                if value:
-                    await ctx.send(f"```py\n{value}\n```")
-            else:
-                self._last_result = ret
-                await ctx.send(f"```py\n{value}{ret}\n```")
+                if inspect.CO_COROUTINE & co_code.co_flags == inspect.CO_COROUTINE:
+                    awaitable = FunctionType(co_code, env)
+                    result = await awaitable()
+                else:
+                    result = runwith(co_code, env)
+        except Exception:
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            error = traceback.format_exception(exc_type, exc_value, exc_traceback)
+            error.pop(1)
+            error = "".join(error).strip()
+        try:
+            await ctx.message.add_reaction("\u2705")
+        except Exception:
+            pass
+        log.spam(f"result: {result}")
+        if result is not None:
+            pprint(result, stream=stdout)
+        result = stdout.getvalue()
+        if result.rstrip("\n") == "":
+            result = None
+
+        msg = await self._send_stdout(ctx=ctx, resp=result, error=error)
+        return msg
 
     @commands.command(pass_context=True, hidden=True, name="print")
     async def _print(self, ctx, *, body: str):
-        """Calls eval but wraps code in print()"""
+        """Calls eval but wraps code in pprint()"""
 
         await ctx.invoke(self._eval, body=f"pprint({body})")
 
@@ -331,6 +418,7 @@ class Admin(commands.Cog):
 
     async def _clean_code(self, ctx: commands.Context, cleaned: str):
         executor = exec
+
         stop = False
         if cleaned.count("\n") == 0:
             # single statement, potentially 'eval'
@@ -363,10 +451,9 @@ class Admin(commands.Cog):
                 await ctx.send("Exiting.")
                 self.sessions.remove(ctx.channel.id)
                 return
-            # right here here here
+
             executor, code, stop = await self._clean_code(ctx, cleaned)
-            if stop:
-                continue
+
             variables["message"] = response
             fmt = None
             stdout = io.StringIO()
@@ -387,7 +474,7 @@ class Admin(commands.Cog):
                     fmt = f"```py\n{value}\n```"
             try:
                 if fmt is not None:
-                    if len(fmt) > 2000:
+                    if len(fmt) > MESSAGE_LIMIT:
                         await ctx.send("Content too big to be printed.")
                     else:
                         await ctx.send(fmt)
@@ -435,7 +522,7 @@ class Admin(commands.Cog):
         msg.content = ctx.prefix + command
 
         new_ctx = await self.bot.get_context(msg, cls=type(ctx))
-        new_ctx._db = PerformanceMocker()
+        # new_ctx._db = PerformanceMocker()
 
         # Intercepts the Messageable interface a bit
         new_ctx._state = PerformanceMocker()
