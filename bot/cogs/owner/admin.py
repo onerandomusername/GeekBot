@@ -6,7 +6,6 @@ This Source Code Form is subject to the terms of the Mozilla Public
 License, v. 2.0. If a copy of the MPL was not distributed with this
 file, You can obtain one at http://mozilla.org/MPL/2.0/.
 """
-
 import ast
 import asyncio
 import copy
@@ -37,7 +36,9 @@ from typing import Optional, Union
 import discord
 import verboselogs
 from bot import Bot
+from constants import MESSAGE_LIMIT
 from discord.ext import commands
+from utils.file import create_file_obj
 
 log: verboselogs.VerboseLogger = logging.getLogger(__name__)
 
@@ -247,6 +248,76 @@ class Admin(commands.Cog):
 
     #     await ctx.send('\n'.join(f'{status}: `{module}`' for status, module in statuses))
 
+    @staticmethod
+    def _runwith(code: str):
+        """determine the meth to run the code with"""
+        code = code.strip()
+        if ";" in code:
+            return exec
+        elif "\n" in code:
+            if code.count("\\\n") == code.count("\n"):
+                return eval
+            else:
+                return exec
+        elif code.count("\n"):
+            return exec
+        else:
+            return eval
+
+    async def _send_stdout(
+        self,
+        ctx: commands.Context,
+        resp: str = None,
+        error: Exception = None,
+        runtime=None,
+    ) -> discord.Message:
+        """Send a nicely formatted eval response"""
+        if resp is None and error is None:
+            return await ctx.reply(
+                "No output.",
+                allowed_mentions=discord.AllowedMentions(replied_user=False),
+            )
+        resp_file: discord.File = None
+        # for now, we're not gonna handle exceptions as files
+        # unless, for some reason, it has a ``` in it
+        error_file: discord.File = None
+        total_len = 0
+        fmt_resp: str = "```py\n{}```"
+        fmt_err: str = "\nAn error occured. Unforunate.```py\n{}```"
+        out = ""
+        files = []
+
+        # make a resp object
+        if resp is not None:
+            total_len += len(fmt_resp)
+            total_len += len(resp)
+            if "```" in resp:
+                resp_file = True
+
+        if error is not None:
+            total_len += len(fmt_err)
+            total_len += len(error)
+            if "```" in error:
+                error_file = True
+
+        if total_len > MESSAGE_LIMIT:
+            log.debug("rats we gotta upload as a file")
+            resp_file: discord.File = create_file_obj(resp, ext="py")
+        else:
+            # good job, not a file
+            log.debug("sending response as plaintext")
+            out += fmt_resp.format(resp) if resp is not None else ""
+        out += fmt_err.format(error) if error is not None else ""
+
+        for f in resp_file, error_file:
+            if f is not None:
+                files.append(f)
+        return await ctx.reply(
+            out,
+            files=files,
+            allowed_mentions=discord.AllowedMentions(replied_user=False),
+        )
+
     @commands.command(pass_context=True, hidden=True, name="eval", aliases=["e"])
     async def _eval(self, ctx: commands.Context, *, body: str):
         """Evaluates a code"""
@@ -269,9 +340,11 @@ class Admin(commands.Cog):
         log.spam(f"body: {body}")
         stdout = io.StringIO()
         code = body
+        result = None
+        error = None
         try:
             with redirect_stdout(stdout):
-                runwith = exec if code.strip().count("\n") else eval
+                runwith = self._runwith(code)
                 log.spam(runwith.__name__)
                 co_code = compile(
                     code,
@@ -290,13 +363,15 @@ class Admin(commands.Cog):
             error = traceback.format_exception(exc_type, exc_value, exc_traceback)
             error.pop(1)
             error = "".join(error).strip()
-            await ctx.send(f"```py\n{error}```")  # catch this
-        else:
+            # await ctx.send(f"```py\n{error}```")  # catch this
+
+        log.spam(f"result: {result}")
+        if result is not None:
             pprint(result, stream=stdout)
-            value = stdout.getvalue()
-            if value.rstrip("\n") == "":
-                value = "None"
-            await ctx.send(value)
+        result = stdout.getvalue()
+        if result.rstrip("\n") == "":
+            result = None
+        return await self._send_stdout(ctx=ctx, resp=result, error=error)
 
     @commands.command(pass_context=True, hidden=True, name="print")
     async def _print(self, ctx, *, body: str):
@@ -393,7 +468,7 @@ class Admin(commands.Cog):
                     fmt = f"```py\n{value}\n```"
             try:
                 if fmt is not None:
-                    if len(fmt) > 2000:
+                    if len(fmt) > MESSAGE_LIMIT:
                         await ctx.send("Content too big to be printed.")
                     else:
                         await ctx.send(fmt)
