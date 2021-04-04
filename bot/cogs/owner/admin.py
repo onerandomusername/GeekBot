@@ -365,7 +365,6 @@ class Admin(commands.Cog):
             error = traceback.format_exception(exc_type, exc_value, exc_traceback)
             error.pop(1)
             error = "".join(error).strip()
-            # await ctx.send(f"```py\n{error}```")  # catch this
         try:
             await ctx.message.add_reaction("\u2705")
         except Exception:
