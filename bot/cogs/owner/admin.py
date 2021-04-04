@@ -7,6 +7,7 @@ License, v. 2.0. If a copy of the MPL was not distributed with this
 file, You can obtain one at http://mozilla.org/MPL/2.0/.
 """
 
+import ast
 import asyncio
 import copy
 
@@ -30,6 +31,7 @@ from contextlib import redirect_stdout
 
 # to expose to the eval command
 from pprint import pprint
+from types import FunctionType
 from typing import Optional, Union
 
 import discord
@@ -109,6 +111,7 @@ class Admin(commands.Cog):
     """Admin-only commands that make the bot dynamic."""
 
     def __init__(self, bot: Bot):
+        log.debug("loading cog Admin")
         self.bot = bot
         self._last_result = None
         self.sessions = set()
@@ -244,9 +247,10 @@ class Admin(commands.Cog):
 
     #     await ctx.send('\n'.join(f'{status}: `{module}`' for status, module in statuses))
 
-    @commands.command(pass_context=True, hidden=True, name="eval")
+    @commands.command(pass_context=True, hidden=True, name="eval", aliases=["e"])
     async def _eval(self, ctx: commands.Context, *, body: str):
         """Evaluates a code"""
+        log.spam("command _eval executed.")
 
         env = {
             "bot": self.bot,
@@ -260,41 +264,43 @@ class Admin(commands.Cog):
         }
 
         env.update(globals())
-
+        log.spam("updated globals")
         body = self.cleanup_code(body)
+        log.spam(f"body: {body}")
         stdout = io.StringIO()
-
-        to_compile = f'async def func():\n{textwrap.indent(body, "  ")}'
-
-        try:
-            exec(to_compile, env)
-        except Exception as e:
-            return await ctx.send(f"```py\n{e.__class__.__name__}: {e}\n```")
-
-        func = env["func"]
+        code = body
         try:
             with redirect_stdout(stdout):
-                ret = await func()
-        except Exception:
-            value = stdout.getvalue()
-            await ctx.send(f"```py\n{value}{traceback.format_exc()}\n```")
-        else:
-            value = stdout.getvalue()
-            try:
-                await ctx.message.add_reaction("\u2705")
-            except Exception:
-                pass
+                runwith = exec if code.strip().count("\n") else eval
+                log.spam(runwith.__name__)
+                co_code = compile(
+                    code,
+                    "<int eval>",
+                    runwith.__name__,
+                    flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT,
+                )
 
-            if ret is None:
-                if value:
-                    await ctx.send(f"```py\n{value}\n```")
-            else:
-                self._last_result = ret
-                await ctx.send(f"```py\n{value}{ret}\n```")
+                if inspect.CO_COROUTINE & co_code.co_flags == inspect.CO_COROUTINE:
+                    awaitable = FunctionType(co_code, env)
+                    result = (await awaitable()) or ""  # catch this
+                else:
+                    result = runwith(co_code, env)  # catch this
+        except Exception:
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            error = traceback.format_exception(exc_type, exc_value, exc_traceback)
+            error.pop(1)
+            error = "".join(error).strip()
+            await ctx.send(f"```py\n{error}```")  # catch this
+        else:
+            pprint(result, stream=stdout)
+            value = stdout.getvalue()
+            if value.rstrip("\n") == "":
+                value = "None"
+            await ctx.send(value)
 
     @commands.command(pass_context=True, hidden=True, name="print")
     async def _print(self, ctx, *, body: str):
-        """Calls eval but wraps code in print()"""
+        """Calls eval but wraps code in pprint()"""
 
         await ctx.invoke(self._eval, body=f"pprint({body})")
 
@@ -331,6 +337,7 @@ class Admin(commands.Cog):
 
     async def _clean_code(self, ctx: commands.Context, cleaned: str):
         executor = exec
+
         stop = False
         if cleaned.count("\n") == 0:
             # single statement, potentially 'eval'
@@ -363,10 +370,9 @@ class Admin(commands.Cog):
                 await ctx.send("Exiting.")
                 self.sessions.remove(ctx.channel.id)
                 return
-            # right here here here
+
             executor, code, stop = await self._clean_code(ctx, cleaned)
-            if stop:
-                continue
+
             variables["message"] = response
             fmt = None
             stdout = io.StringIO()
