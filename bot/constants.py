@@ -3,6 +3,7 @@ MESSAGE_LIMIT = 2000
 
 class Github:
     api_link = "https://api.github.com"
+    base_link = "https://github.com"
 
     class Me:
         org = "onerandomusername"
