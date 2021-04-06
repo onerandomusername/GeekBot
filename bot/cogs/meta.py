@@ -5,6 +5,7 @@ import logging
 import textwrap
 import time
 import typing
+from io import BytesIO
 from pathlib import Path
 
 import discord
@@ -48,40 +49,60 @@ class SomeCommands(commands.Cog):
             else ""
         )
 
-    async def _get_github_source(
-        self, ctx: commands.Context, command: str, file, length
-    ):
-        src_link = "{0}/repos/{1}/{2}/contents/{3}".format(
-            Github.api_link, Github.Me.org, Github.Me.repo, file.lstrip("/")
-        )
-        async with self.bot.http_session.get(src_link) as resp:
-            if resp.status != 200:
-                raise commands.CommandError("Command Not [on github].")
-            json = await resp.json()
-            source_code = base64.b64decode(json["content"]).decode("utf-8")
-            line_num = None
-            the_ast = ast.parse(source_code)
-            for node in ast.walk(the_ast):
-                if isinstance(node, ast.AsyncFunctionDef) or isinstance(
-                    node, ast.FunctionDef
-                ):
-                    if getattr(node, "name", "") == command:
-                        line_num = node.lineno - len(node.decorator_list)
+    def _get_get_source(self, func, json, branch=None):
+        source_code = base64.b64decode(json["content"]).decode("utf-8")
+        line_num = None
+        the_ast = ast.parse(source_code)
+        for node in ast.walk(the_ast):
+            if isinstance(node, ast.AsyncFunctionDef) or isinstance(
+                node, ast.FunctionDef
+            ):
+                if getattr(node, "name", "") == func:
+                    line_num = node.lineno - len(node.decorator_list)
 
-                        end_line_num = node.end_lineno
-                        break
+                    end_line_num = node.end_lineno
+                    break
 
-            if line_num is None:
-                raise commands.CommandError("Command Not [on github].")
-
-            return "{0}/{1}/{2}/tree/main/{3}#L{4}-L{5}".format(
+        if line_num is None:
+            return None, branch, None, None
+        if branch is None:
+            branch = json["url"].split("?ref=", 1)[1]
+        path = json["path"].lstrip("/")
+        return (
+            "{0}/{1}/{2}/tree/{6}/{3}#L{4}-L{5}".format(
                 Github.base_link,
                 Github.Me.org,
                 Github.Me.repo,
-                file.lstrip("/"),
+                path,
                 line_num,
                 end_line_num,
-            )
+                branch,
+            ),
+            branch,
+            ast.get_docstring(node),
+            path,
+        )
+
+    async def _get_source(self, func: str, file, branch=None):
+        src_link_no_branch = "{0}/repos/{1}/{2}/contents/{3}".format(
+            Github.api_link, Github.Me.org, Github.Me.repo, file.lstrip("/")
+        )
+        async with self.bot.http_session.get(f"{src_link_no_branch}") as resp:
+            if resp.status != 200:
+                raise commands.CommandError("Command Not [on github].")
+            json = await resp.json()
+        link, found_branch, docstring, path = self._get_get_source(func, json)
+        if link is None and branch is not None and found_branch != branch:
+            async with self.bot.http_session.get(
+                f"{src_link_no_branch}?ref={branch}"
+            ) as resp:
+                if resp.status != 200:
+                    raise commands.CommandError("Command Not [on github].")
+                json = await resp.json()
+            link, found_branch, docstring, _ = self._get_get_source(func, json, branch)
+        if link is None:
+            raise commands.CommandError("Command Not [on github].")
+        return link, docstring, found_branch
 
     @commands.command(name="source", aliases=["src", "code"])
     async def source(self, ctx: commands.Context, source_item: str = None):
@@ -89,28 +110,31 @@ class SomeCommands(commands.Cog):
         if source_item is None:
             await ctx.send(github_link)
             return
+
+        # send a typing event while we get from github
+        # normally this would be an async with,
+        # but no reason to do so since it shouldn't take very long to do this code,
+        # therefore no reason to make it with.
+        # if its been long enough that it has to fire again we've errorer or send a response
+        await ctx.trigger_typing()
+
         cmd = self.bot.get_command(source_item)
 
         if cmd is None:
             raise commands.CommandError("Couldn't find command.")
         callback = cmd.callback
-        source_lines = inspect.getsourcelines(callback)
-        source_file = inspect.getsourcefile(callback)
-        source_file = str(Path(source_file).relative_to(str(Path.cwd())))
-        length, start_line = len(source_lines[0]), source_lines[1]
-        end_line = start_line + length - 1
+        source_file = str(
+            Path(inspect.getsourcefile(callback)).relative_to(str(Path.cwd()))
+        )
 
         repo = pygit2.Repository(".git")
-        tree = None
         for branch in list(repo.branches.local):
             b = repo.lookup_branch(branch)
             if b.is_head():
-                tree = branch
                 break
-        link = f"{github_link}/tree/{tree}/{source_file}"
-        link += f"#L{start_line}-L{end_line}"
-        link = await self._get_github_source(
-            ctx, callback.__name__, source_file, length
+
+        link, doc_string, branch = await self._get_source(
+            callback.__name__, source_file, branch
         )
         if not ctx.channel.permissions_for(ctx.me) >= discord.Permissions(
             embed_links=True, attach_files=True
@@ -120,10 +144,25 @@ class SomeCommands(commands.Cog):
 
         # make a fancy embed!
         e = discord.Embed()
-        e.description = f"{cmd.short_doc}\n\n" f"[View on github.]({link})"
+        e.description = f"{doc_string}\n\n" f""
         e.title = cmd.qualified_name
+        thumb = discord.File(
+            BytesIO(await self.bot.user.avatar_url_as(format="png").read()),
+            filename="thumb.png",
+        )
+        e.set_thumbnail(url="attachment://thumb.png")
         e.set_footer(text=f"/{source_file}")
-        await ctx.send(embed=e)
+        e.add_field(
+            name="Source Code",
+            value=f"[Open in Github]({link}) {self.bot.get_emoji(828722619925790720)}",
+            inline=True,
+        )
+        if branch not in ["main", "master"]:
+            e.add_field(
+                name="Branch",
+                value=branch,
+            )
+        await ctx.send(embed=e, file=thumb)
 
 
 def setup(bot: Bot):
