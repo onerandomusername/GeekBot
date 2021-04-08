@@ -14,6 +14,7 @@ from os import getenv
 from typing import Dict, List, Optional
 
 import aiohttp
+import asyncpraw
 import coloredlogs
 import discord
 import verboselogs
@@ -26,7 +27,7 @@ EXTENSIONS = (
     "cogs.owner.admin",
     "cogs.cloudahk",
     "cogs.meta",
-    "cogs.source",
+    "cogs.github",
     "utils.error_handling",
 )
 
@@ -80,8 +81,8 @@ def setup_logger():  # -> logging.getLogger:
     return logging.getLogger(__name__)
 
 
-class Bot(commands.Bot):
-    """A custom implemetation of `commands.Bot`"""
+class Bot(commands.AutoShardedBot):
+    """A custom implemetation of `commands.AutoShardedBot`"""
 
     # http_session: aiohttp.ClientSession
 
@@ -91,7 +92,7 @@ class Bot(commands.Bot):
         self.closing_tasks: List[asyncio.Task] = []
         self.invite_link = "https://discord.com/api/oauth2/authorize?client_id={}&permissions=379968&scope=bot"
 
-    def create_http_pool(self) -> None:
+    async def create_http_pool(self) -> None:
         aiohttp_log: verboselogs.VerboseLogger = logging.getLogger("aiotrace")
 
         async def on_request_end(self, session, end):
@@ -130,7 +131,9 @@ class Bot(commands.Bot):
         """Close the Discord connection and the aiohttp session"""
         # Done before super().close() to allow tasks finish before the HTTP session closes.
         await self.change_presence(
-            activity=discord.Game(name="shutting down", status=discord.Status.dnd)
+            activity=discord.Game(
+                name="shutting down", status=discord.Status.do_not_disturb
+            )
         )
         for ext in list(EXTENSIONS):
             with suppress(Exception):
@@ -165,9 +168,29 @@ class Bot(commands.Bot):
 
 if __name__ == "__main__":
     log = setup_logger()
-    bot = Bot(command_prefix="=", description=DESCRIPTION)
-    bot.create_http_pool()
+    intents = discord.Intents.all()
+    allowed_mentions = discord.AllowedMentions(
+        everyone=False,
+        users=True,
+        roles=False,
+        replied_user=False,
+    )
+    bot = Bot(
+        command_prefix="=",
+        description=DESCRIPTION,
+        allowed_mentions=allowed_mentions,
+        intents=intents,
+    )
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(bot.create_http_pool())
     bot.load_extensions()
-    bot.run(TOKEN)
+    loop.run_until_complete(bot.login(TOKEN))
+    try:
+        loop.run_until_complete(bot.connect())
+    except KeyboardInterrupt:
+        loop.run_until_complete(bot.close())
+        # cancel all tasks lingering
+    finally:
+        loop.close()
     # restart whenever we exit mwahahahah
     # os.execl(sys.executable, sys.executable, *sys.argv)

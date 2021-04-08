@@ -135,10 +135,15 @@ class Admin(commands.Cog):
         """Automatically removes code blocks from the code."""
         # remove ```py\n```
         if content.startswith("```") and content.endswith("```"):
-            return "\n".join(content.split("\n")[1:-1])
+            content = "\n".join(content.split("\n")[1:-1])
 
         # remove `foo`
-        return content.strip("` \n")
+        content = content.strip("` \n").strip("`")
+
+        # so we can copy paste code, dedent it.
+        content = textwrap.dedent(content)
+
+        return content
 
     async def cog_check(self, ctx):
         return await self.bot.is_owner(ctx.author)
@@ -273,6 +278,7 @@ class Admin(commands.Cog):
     ) -> discord.Message:
         """Send a nicely formatted eval response"""
         if resp is None and error is None:
+            return None
             return await ctx.send(
                 "No output.",
                 allowed_mentions=discord.AllowedMentions(replied_user=False),
@@ -301,7 +307,7 @@ class Admin(commands.Cog):
             if "```" in error:
                 error_file = True
 
-        if total_len > MESSAGE_LIMIT:
+        if total_len > MESSAGE_LIMIT or resp_file:
             log.debug("rats we gotta upload as a file")
             resp_file: discord.File = create_file_obj(resp, ext="py")
         else:
@@ -321,7 +327,7 @@ class Admin(commands.Cog):
         )
 
     @commands.command(pass_context=True, hidden=True, name="eval", aliases=["e"])
-    async def _eval(self, ctx: commands.Context, *, body: str):
+    async def _eval(self, ctx: commands.Context, *, code: str):
         """Evaluates provided code. Owner only."""
         log.spam("command _eval executed.")
 
@@ -338,10 +344,9 @@ class Admin(commands.Cog):
 
         env.update(globals())
         log.spam("updated globals")
-        body = self.cleanup_code(body)
-        log.spam(f"body: {body}")
+        code = self.cleanup_code(code)
+        log.spam(f"body: {code}")
         stdout = io.StringIO()
-        code = body
         result = None
         error = None
         try:
@@ -375,7 +380,7 @@ class Admin(commands.Cog):
         result = stdout.getvalue()
         if result.rstrip("\n") == "":
             result = None
-
+        self._last_result = result
         msg = await self._send_stdout(ctx=ctx, resp=result, error=error)
         return msg
 

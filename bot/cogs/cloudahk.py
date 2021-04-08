@@ -137,7 +137,7 @@ class CloudAHK(commands.Cog):
         except KeyError:
             language = lang
 
-        file = None
+        file1 = None
         encoded_stdout = stdout.encode("utf-8")
 
         if (
@@ -177,10 +177,11 @@ class CloudAHK(commands.Cog):
             f"*CloudAHK Backend Variant: `{version}`*",
         )
 
-        try:
-            await ctx.send(content=out, files=[file1], reference=ctx.message)
-        except discord.HTTPException:
-            await ctx.send(content=out, file=file)
+        await ctx.send(
+            content=out,
+            files=file1,
+            reference=ctx.message.to_reference(fail_if_not_exists=False),
+        )
 
         return stdout, time
 
