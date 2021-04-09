@@ -27,7 +27,6 @@ EXTENSIONS = (
     "cogs.owner.admin",
     "cogs.cloudahk",
     "cogs.meta",
-    "cogs.github",
     "utils.error_handling",
 )
 
