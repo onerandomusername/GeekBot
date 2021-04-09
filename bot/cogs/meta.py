@@ -21,7 +21,7 @@ github_link = Github.Me.html_link
 log: verboselogs.VerboseLogger = logging.getLogger(__name__)
 
 
-class SomeCommands(commands.Cog):
+class Meta(commands.Cog):
     """A couple of simple commands."""
 
     def __init__(self, bot: Bot):
@@ -87,10 +87,12 @@ class SomeCommands(commands.Cog):
         src_link_no_branch = "{0}/repos/{1}/{2}/contents/{3}".format(
             Github.api_link, Github.Me.org, Github.Me.repo, file.lstrip("/")
         )
+        # try the master branch
         async with self.bot.http_session.get(f"{src_link_no_branch}") as resp:
-            if resp.status != 200:
+            if resp.status != 404 and resp.status != 200:
                 raise commands.CommandError("Command Not [on github].")
             json = await resp.json()
+
         link, found_branch, docstring, path = self._get_get_source(func, json)
         if link is None and branch is not None and found_branch != branch:
             async with self.bot.http_session.get(
@@ -127,6 +129,8 @@ class SomeCommands(commands.Cog):
             Path(inspect.getsourcefile(callback)).relative_to(str(Path.cwd()))
         )
 
+        # determine the current branch
+        # this is used to get which branch we should look in on the repo if we can't find the command on the main/master branch
         repo = pygit2.Repository(".git")
         for branch in list(repo.branches.local):
             b = repo.lookup_branch(branch)
@@ -136,6 +140,8 @@ class SomeCommands(commands.Cog):
         link, doc_string, branch = await self._get_source(
             callback.__name__, source_file, branch
         )
+
+        # check for image permissions and if we don't have them then just send the link and be lazy.
         if not ctx.channel.permissions_for(ctx.me) >= discord.Permissions(
             embed_links=True, attach_files=True
         ):
@@ -166,4 +172,4 @@ class SomeCommands(commands.Cog):
 
 
 def setup(bot: Bot):
-    bot.add_cog(SomeCommands(bot))
+    bot.add_cog(Meta(bot))
