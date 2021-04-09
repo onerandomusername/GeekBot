@@ -259,15 +259,13 @@ class Admin(commands.Cog):
         code = code.strip()
         if ";" in code:
             return exec
-        elif "\n" in code:
-            if code.count("\\\n") == code.count("\n"):
-                return eval
-            else:
-                return exec
-        elif code.count("\n"):
+        if "\n" in code:
             return exec
-        else:
-            return eval
+        parsed_code = ast.parse(code)
+        for node in ast.iter_fields(parsed_code):
+            if isinstance(node, ast.Assign):
+                return exec
+        return eval
 
     async def _send_stdout(
         self,
