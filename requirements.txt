@@ -19,7 +19,7 @@ emoji==0.5.4
 filelock==3.0.12
 fuzzywuzzy==0.18.0
 humanfriendly==9.1
-lxml==4.6.3
+lxml==4.6.5
 multidict==5.1.0
 parse==1.19.0
 parsedatetime==2.5
