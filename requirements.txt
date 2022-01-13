@@ -23,7 +23,7 @@ lxml==4.6.5
 multidict==5.1.0
 parse==1.19.0
 parsedatetime==2.5
-pipenv==2020.11.15
+pipenv==2022.1.8
 pkg-resources==0.0.0
 psutil==5.7.0
 pycodestyle==2.7.0
